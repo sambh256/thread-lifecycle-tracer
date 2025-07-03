@@ -1,3 +1,5 @@
+import csv
+import os
 from bcc import BPF
 from datetime import datetime
 from time import sleep
@@ -74,9 +76,33 @@ TRACEPOINT_PROBE(sched, sched_wakeup) {
     return 0;
 }
 """
+log_file = "thread_events_log.csv"
+new_file = not os.path.exists(log_file)
+
+csvfile = open(log_file, "a", newline="")
+csvwriter = csv.writer(csvfile)
+
+if new_file:
+    csvwriter.writerow([
+        "Timestamp", "Event_Type", "PID", "PPID",
+        "Command", "Parent_Command", "Child_Command",
+        "Prev_PID", "Prev_Command", "Next_PID", "Next_Command"
+    ])
 
 # Load BPF
 b = BPF(text=bpf_program)
+log_file = "thread_events_log.csv"
+new_file = not os.path.exists(log_file)
+
+csvfile = open(log_file, "a", newline="")
+csvwriter = csv.writer(csvfile)
+
+if new_file:
+    csvwriter.writerow([
+        "Timestamp", "Event_Type", "PID", "PPID",
+        "Command", "Parent_Command", "Child_Command",
+        "Prev_PID", "Prev_Command", "Next_PID", "Next_Command"
+    ])
 
 # Define event struct
 class Event(ctypes.Structure):
@@ -96,15 +122,12 @@ class Event(ctypes.Structure):
 def handle_event(cpu, data, size):
     event = ctypes.cast(data, ctypes.POINTER(Event)).contents
     ts = datetime.now().strftime("%H:%M:%S")
+
+    # Filter out SWITCH and WAKEUP events
     if event.event_type in (2, 3):
         return
 
-    ts = datetime.now().strftime("%H:%M:%S")
-    if event.event_type == 0:
-        print(f"[{ts}] FORK: Parent PID {event.ppid} ({event.parent_comm.decode()}) -> Child PID {event.pid} ({event.comm.decode()})")
-    elif event.event_type == 1:
-        print(f"[{ts}] EXIT: PID {event.pid} ({event.comm.decode()})")
-    # Skip kernel background threads
+    # Filter kernel background threads
     if event.event_type == 0:  # FORK
         if event.parent_comm.decode().startswith("kworker") or \
            event.child_comm.decode().startswith("kworker"):
@@ -112,16 +135,21 @@ def handle_event(cpu, data, size):
     elif event.event_type == 1:  # EXIT
         if event.comm.decode().startswith("kworker"):
             return
-    elif event.event_type == 2:  # SWITCH
-        prev = event.prev_comm.decode()
-        next = event.next_comm.decode()
-        if prev.startswith("kworker") or prev.startswith("swapper") or \
-           next.startswith("kworker") or next.startswith("swapper"):
-            return
-    elif event.event_type == 3:  # WAKEUP
-        if event.comm.decode().startswith("kworker") or \
-           event.comm.decode().startswith("swapper"):
-            return
+
+    # Print and log FORK
+    if event.event_type == 0:
+        print(f"[{ts}] FORK: Parent PID {event.ppid} ({event.parent_comm.decode()}) -> Child PID {event.pid} ({event.comm.decode()})")
+        csvwriter.writerow([ts, "FORK", event.pid, event.ppid,
+                            event.comm.decode(), event.parent_comm.decode(), "", "", "", "", ""])
+
+    # Print and log EXIT
+    elif event.event_type == 1:
+        print(f"[{ts}] EXIT: PID {event.pid} ({event.comm.decode()})")
+        csvwriter.writerow([ts, "EXIT", event.pid, "", event.comm.decode(),
+                            "", "", "", "", "", ""])
+
+    csvfile.flush()
+
 
     # Now print only filtered interesting events
     if event.event_type == 0:
