@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Thread Lifecycle Dashboard</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+</head>
+<body>
+    <h2>Live Thread Events</h2>
+    <div id="output"></div>
+
+    <script>
+        const source = new EventSource("/stream");
+        source.onmessage = function(event) {
+            const div = document.getElementById("output");
+            const p = document.createElement("p");
+            p.textContent = event.data;
+            div.insertBefore(p, div.firstChild);
+        };
+    </script>
+</body>
+</html>
